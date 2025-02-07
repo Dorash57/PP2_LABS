@@ -77,5 +77,3 @@ for x, obj in myfamily.items():
 
   for y in obj:
     print(y + ':', obj[y])
-
-    
