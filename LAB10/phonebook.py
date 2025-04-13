@@ -1,128 +1,136 @@
-import psycopg2 
-import tkinter as tk
-from tkinter import messagebox, ttk
+import csv
+import psycopg2
 
-# Подключение к базе данных
-conn = psycopg2.connect(
-    host="localhost",
-    dbname="lab10",
-    user="postgres",
-    password="Ilyas7002zxz",
-    port=5432
-)
-cur = conn.cursor()
+# Параметры базы данных
+DataBase = {
+    'host': '127.0.0.1',        # адрес сервера БД
+    'port': 5432,               # порт PostgreSQL
+    'database': 'Dorash',   # имя базы данных
+    'user': 'postgres',         # пользователь
+    'password': '1689518779'      # пароль
+}
 
-# Создание таблицы
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS phonebook (
-        user_id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        surname VARCHAR(255) NOT NULL,
-        phone VARCHAR(255) NOT NULL
-    )
-""")
-conn.commit()
+# Создание Таблицы
+def init_db():
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS phonebook (
+                    id SERIAL PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    last_name TEXT,
+                    phone TEXT UNIQUE NOT NULL
+                );
+                """
+            )
+        conn.commit()
 
-# Функции
+#  Добавление данных
+def insert_from_csv(csv_path):
+    # Добавление контактов из CSV-файла.
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur, open(csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                cur.execute(
+                    "INSERT INTO phonebook (first_name, last_name, phone) VALUES (%s, %s, %s)"
+                    " ON CONFLICT (phone) DO NOTHING;",
+                    (row['first_name'], row.get('last_name'), row['phone'])
+                )
+        conn.commit()
+    print("Контакты из CSV загружены.")
 
-def insert_data():
-    name = entry_name.get()
-    surname = entry_surname.get()
-    phone = entry_phone.get()
 
-    if not (name and surname and phone):
-        messagebox.showwarning("Input Error", "Please fill all fields")
-        return
+def insert_console():
+    # Добавление контакта вручную.
+    first = input("Имя: ").strip()
+    last = input("Фамилия (необязательно): ").strip() or None
+    phone = input("Телефон: ").strip()
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO phonebook (first_name, last_name, phone) VALUES (%s, %s, %s)",
+                (first, last, phone)
+            )
+        conn.commit()
+    print("Контакт добавлен.")
 
-    if not phone.isdigit() or len(phone) != 11:
-        messagebox.showerror("Phone Error", "Phone must be 11 digits and contain only numbers.")
-        return
+# Обнова
+def update_contact():
+    # Обновление данных контакта.
+    criterion = input("Обновить по (1) телефону или (2) id? Введите 1 или 2: ")
+    key = input("Введите значение (телефон или id): ").strip()
+    field = input("Поле для изменения (first_name, last_name, phone): ")
+    new_val = input(f"Новое значение для {field}: ")
 
-    cur.execute("INSERT INTO phonebook (name, surname, phone) VALUES (%s, %s, %s)", (name, surname, phone))
-    conn.commit()
-    messagebox.showinfo("Success", "Contact added")
-    refresh_table()
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur:
+            if criterion == '1':
+                cur.execute(f"UPDATE phonebook SET {field} = %s WHERE phone = %s", (new_val, key))
+            else:
+                cur.execute(f"UPDATE phonebook SET {field} = %s WHERE id = %s", (new_val, key))
+        conn.commit()
+    print("Контакт обновлён.")
 
-def delete_data():
-    phone = entry_phone.get()
-    cur.execute("DELETE FROM phonebook WHERE phone = %s", (phone,))
-    conn.commit()
-    messagebox.showinfo("Deleted", "Contact deleted (if existed)")
-    refresh_table()
+# Запрос данных
+def query_phonebook():
+    # Просмотр контактов с фильтрами.
+    print("Фильтры: 1) все  2) по имени  3) по шаблону телефона")
+    choice = input("Выберите фильтр: ")
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur:
+            if choice == '1':
+                cur.execute("SELECT * FROM phonebook ORDER BY first_name")
+            elif choice == '2':
+                name = input("Введите имя для поиска: ").strip()
+                cur.execute("SELECT * FROM phonebook WHERE first_name ILIKE %s", (f"%{name}%",))
+            else:
+                pattern = input("Введите шаблон телефона ").strip()
+                cur.execute("SELECT * FROM phonebook WHERE phone LIKE %s", (pattern,))
+            rows = cur.fetchall()
+            for r in rows:
+                print(r)
 
-def update_data():
-    phone = entry_phone.get()
-    new_name = entry_name.get()
-    new_surname = entry_surname.get()
-    cur.execute("UPDATE phonebook SET name = %s, surname = %s WHERE phone = %s", (new_name, new_surname, phone))
-    conn.commit()
-    messagebox.showinfo("Updated", "Contact updated")
-    refresh_table()
+# Удаление данных
+def delete_contact():
+    # Удаление контакта по телефону или id.
+    choice = input("Удалить по (1) телефону или (2) id? ")
+    key = input("Введите значение: ").strip()
+    with psycopg2.connect(**DataBase) as conn:
+        with conn.cursor() as cur:
+            if choice == '1':
+                cur.execute("DELETE FROM phonebook WHERE phone = %s", (key,))
+            else:
+                cur.execute("DELETE FROM phonebook WHERE id = %s", (key,))
+        conn.commit()
+    print("Контакт удалён.")
 
-def refresh_table():
-    for row in tree.get_children():
-        tree.delete(row)
-    cur.execute("SELECT * FROM phonebook")
-    rows = cur.fetchall()
-    for row in rows:
-        tree.insert("", tk.END, values=row)
+# Меню
+def main():
+    init_db()
+    while True:
+        print("\nМеню Телефонной книги:")
+        print("1. Импорт из CSV")
+        print("2. Добавить контакт вручную")
+        print("3. Обновить контакт")
+        print("4. Поиск контактов")
+        print("5. Удалить контакт")
+        print("0. Выход")
+        inp = input("Выберите опцию: ")
+        if inp == '1':
+            path = input("Путь к CSV-файлу: ")
+            insert_from_csv(path)
+        elif inp == '2':
+            insert_console()
+        elif inp == '3':
+            update_contact()
+        elif inp == '4':
+            query_phonebook()
+        elif inp == '5':
+            delete_contact()
+        elif inp == '0':
+            break
 
-def search_by_phone():
-    phone = entry_search.get()
-    for row in tree.get_children():
-        tree.delete(row)
-    cur.execute("SELECT * FROM phonebook WHERE phone = %s", (phone,))
-    rows = cur.fetchall()
-    for row in rows:
-        tree.insert("", tk.END, values=row)
-
-# UI
-root = tk.Tk()
-root.title("PhoneBook GUI")
-root.geometry("600x500")
-
-frame = tk.Frame(root)
-frame.pack(pady=10)
-
-tk.Label(frame, text="Name").grid(row=0, column=0)
-entry_name = tk.Entry(frame)
-entry_name.grid(row=0, column=1)
-
-tk.Label(frame, text="Surname").grid(row=1, column=0)
-entry_surname = tk.Entry(frame)
-entry_surname.grid(row=1, column=1)
-
-tk.Label(frame, text="Phone").grid(row=2, column=0)
-entry_phone = tk.Entry(frame)
-entry_phone.grid(row=2, column=1)
-
-btn_frame = tk.Frame(root)
-btn_frame.pack(pady=10)
-
-tk.Button(btn_frame, text="Add", command=insert_data).grid(row=0, column=0, padx=10)
-tk.Button(btn_frame, text="Update", command=update_data).grid(row=0, column=1, padx=10)
-tk.Button(btn_frame, text="Delete", command=delete_data).grid(row=0, column=2, padx=10)
-tk.Button(btn_frame, text="Refresh", command=refresh_table).grid(row=0, column=3, padx=10)
-
-# Поиск
-search_frame = tk.Frame(root)
-search_frame.pack(pady=10)
-
-tk.Label(search_frame, text="Search by Phone").grid(row=0, column=0)
-entry_search = tk.Entry(search_frame)
-entry_search.grid(row=0, column=1)
-tk.Button(search_frame, text="Search", command=search_by_phone).grid(row=0, column=2, padx=10)
-
-# Таблица
-cols = ("ID", "Name", "Surname", "Phone")
-tree = ttk.Treeview(root, columns=cols, show="headings")
-for col in cols:
-    tree.heading(col, text=col)
-    tree.column(col, width=100)
-tree.pack(expand=True, fill='both')
-
-refresh_table()
-root.mainloop()
-
-cur.close()
-conn.close()
+if __name__ == '__main__':
+    main()
